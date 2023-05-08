@@ -35,7 +35,7 @@ def load_dataset(
                        num_parallel_calls=AUTOTUNE)
     if mode == 'train':
         ds = ds.shuffle(
-            buffer_size=30000, reshuffle_each_iteration=True
+            buffer_size=50000, reshuffle_each_iteration=True
         )
     ds = ds.map(
         lambda record: parse_example(record, args.DATASET.COMMON.K),
@@ -97,7 +97,7 @@ def load_unlabeled_dataset(
                        num_parallel_calls=AUTOTUNE)
 
     ds = ds.shuffle(
-        buffer_size=30000, reshuffle_each_iteration=True
+        buffer_size=50000, reshuffle_each_iteration=True
     )
 
     ds = ds.map(

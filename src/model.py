@@ -5,7 +5,7 @@ import tensorflow as tf
 from tensorflow.python.keras import layers
 from tensorflow.python.keras import Model, Input
 
-from utils import generate_affine_matrix
+from decode import heatmap_to_coordinate
 
 
 def get_single_theta(
@@ -180,35 +180,68 @@ def bilinear_sampler(img, x, y):
     return out
 
 
-def mask_joint(image, joints, MASK_JOINT_NUM=4):
-    # N,J,2 joints
-    N, J = joints.shape[:2]
-    _, _, width, height = image.shape
-    re_joints = joints[:, :, :2] + torch.randn((N, J, 2)).cuda()*10
-    re_joints = re_joints.int()
-    size = torch.randint(10, 20, (N, J, 2)).int().cuda()
+def mask_single_joint(image, xmin, ymin, xmax, ymax):
+    """
+    image: (B, H, W, 3)
+    xmin ~ ymax: (B,)
+    """
+    xx, yy = tf.meshgrid(
+        tf.range(image.shape[2]),
+        tf.range(image.shape[1])
+    )
+    grid_xy = tf.stack([xx, yy], axis=-1)
+    # grid_xy = tf.cast(grid_xy, tf.float32)  # (H, W, 2)
+    grid_xy = tf.tile(
+        tf.expand_dims(grid_xy, 0),
+        [tf.shape(image)[0], 1, 1, 1]
+    )  # (B, H, W, 2)
 
-    x0 = re_joints[:, :, 0]-size[:, :, 0]
-    y0 = re_joints[:, :, 1]-size[:, :, 1]
+    # check occlusion range
+    mask_x = tf.math.logical_and(
+        grid_xy[..., 0] >= xmin,
+        grid_xy[..., 0] <= xmax,
+    )
+    mask_y = tf.math.logical_and(
+        grid_xy[..., 1] >= ymin,
+        grid_xy[..., 1] <= ymax,
+    )
+    mask = tf.stack([mask_x, mask_y], axis=-1)
+    mask = tf.math.reduce_all(mask, axis=-1, keepdims=True)
+    mask = tf.cast(mask, tf.float32)
 
-    x1 = re_joints[:, :, 0]+size[:, :, 0]
-    y1 = re_joints[:, :, 1]+size[:, :, 1]
+    gnoise = generate_random_noise(tf.shape(image))
+    masked_image = mask * gnoise + (1 - mask) * image
+    return masked_image
 
-    torch.clamp_(x0, 0, width)
-    torch.clamp_(x1, 0, width)
-    torch.clamp_(y0, 0, height)
-    torch.clamp_(y1, 0, height)
 
-    for i in range(N):
-        # num = np.random.randint(MASK_JOINT_NUM)
-        # ind = np.random.choice(J, num)
-        ind = np.random.choice(J, MASK_JOINT_NUM)
-        for j in ind:
-            image[i, :, y0[i, j]:y1[i, j], x0[i, j]:x1[i, j]] = 0
-    return image
+def generate_random_noise(
+    image_shape: List,
+    means: List = [0.485, 0.456, 0.406],
+    stds: List = [0.229, 0.224, 0.225]
+) -> tf.Tensor:
+    return 255. * tf.random.normal(
+        shape=image_shape,
+        mean=means,
+        stddev=stds,
+        dtype=tf.float32
+    )
 
 
 def mask_joints(image, keypoints, n_masks: int = 4):
+    """
+    unlabeled image 예측 결과를 바탕으로 입력 이미지에 joints cutout 적용
+
+    NOTE: while_loop 대신 matrix-broadcasting을 적용하여 속도 4배 향상
+
+    Args:
+        image (tf.Tensor): batch input images; (B, H, W, 3)
+        keypoints (_type_): unlabeled image prediction; (B, K, 2)
+        n_masks (int, optional): number of joints to be masked.
+            Defaults to 4.
+
+    Returns:
+        tf.Tensor: same shape and dtype of input image
+    """
     B = tf.shape(keypoints)[0]
     K = tf.shape(keypoints)[1]
     height = tf.shape(image)[1]
@@ -218,8 +251,71 @@ def mask_joints(image, keypoints, n_masks: int = 4):
     re_keypoints = tf.cast(re_keypoints, tf.int32)
     size = tf.random.uniform([B, K, 2], 10, 20, tf.int32)
 
-    tl = re_keypoints - size
-    br = re_keypoints + size
+    tl = re_keypoints - size  # xmin, ymin
+    br = re_keypoints + size  # xmax, ymax
+
+    # (B, K) shape tensors
+    xmin = tf.clip_by_value(tl[..., 0], 0, width)
+    ymin = tf.clip_by_value(tl[..., 1], 0, height)
+    xmax = tf.clip_by_value(br[..., 0], 0, width)
+    ymax = tf.clip_by_value(br[..., 1], 0, height)
+
+    mask_indices = tf.random.uniform([B, n_masks], maxval=K, dtype=tf.int32)
+    mask_indices = tf.stack(
+        [
+            tf.tile(tf.expand_dims(tf.range(B), 1), multiples=[1, n_masks]),
+            mask_indices
+        ],
+        axis=-1
+    )
+    xmin = tf.gather_nd(xmin, mask_indices)  # (B, n_masks)
+    ymin = tf.gather_nd(ymin, mask_indices)
+    xmax = tf.gather_nd(xmax, mask_indices)
+    ymax = tf.gather_nd(ymax, mask_indices)
+
+    # i = tf.constant(0)
+    # _, image = tf.while_loop(
+    #     cond=lambda i, _: tf.math.less(i, n_masks),
+    #     body=lambda i, image: (
+    #         i + 1,
+    #         # image
+    #         mask_single_joint(
+    #             image,
+    #             xmin[:, i], ymin[:, i], xmax[:, i], ymax[:, i]
+    #         )
+    #     ),
+    #     loop_vars=[i, image]
+    # )
+
+    xx, yy = tf.meshgrid(
+        tf.range(image.shape[2]),
+        tf.range(image.shape[1])
+    )
+    grid_xy = tf.stack([xx, yy], axis=-1)
+    grid_xy = tf.tile(
+        tf.expand_dims(grid_xy, 0),
+        [tf.shape(image)[0], 1, 1, 1]
+    )  # (B, H, W, 2)
+    grid_xy = tf.expand_dims(grid_xy, axis=3)  # (B, H, W, 1, 2)
+
+    tl = tf.reshape(
+        tf.stack([xmin, ymin], axis=-1),
+        (-1, 1, 1, xmin.shape[-1], 2)
+    )
+    br = tf.reshape(
+        tf.stack([xmax, ymax], axis=-1),
+        (-1, 1, 1, xmax.shape[-1], 2)
+    )
+    mask = tf.math.logical_and(
+        grid_xy >= tl,
+        grid_xy <= br,
+    )
+    mask = tf.math.reduce_all(mask, axis=-1)
+    mask = tf.math.reduce_any(mask, axis=-1, keepdims=True)
+    mask = tf.cast(mask, tf.float32)
+
+    gnoise = generate_random_noise(tf.shape(image))
+    return mask * gnoise + (1 - mask) * image
 
 
 class PoseCoTrain(Model):
@@ -229,13 +325,15 @@ class PoseCoTrain(Model):
         heavy_model,
         lite_model,
         scale_factor,
-        rotation_factor
+        rotation_factor,
+        n_joints_mask
     ):
         super().__init__()
         self.heavy_model = heavy_model
         self.lite_model = lite_model
         self.sf = scale_factor
         self.rf = rotation_factor
+        self.n_joints_mask = n_joints_mask
 
     def call(self, sup_x, unsup_x):
         B = tf.shape(sup_x)[0]
@@ -250,9 +348,21 @@ class PoseCoTrain(Model):
         unsup_hm1 = self.heavy_model(unsup_x, training=False)
         unsup_hm2 = self.lite_model(unsup_x, training=False)
 
-        # TODO: mask joints (joint cutout)
+        unsup_x_trans = unsup_x
+        unsup_x_trans_2 = unsup_x
 
-        # ----
+        # Joint Cutout
+        # Masking joints
+        if self.n_joints_mask > 0:
+            pred_1 = heatmap_to_coordinate(unsup_hm1)
+            pred_2 = heatmap_to_coordinate(unsup_hm2)
+
+            unsup_x_trans = mask_joints(
+                unsup_x_trans, pred_1 * 4, self.n_joints_mask
+            )
+            unsup_x_trans_2 = mask_joints(
+                unsup_x_trans_2, pred_2 * 4, self.n_joints_mask
+            )
 
         # Apply Affine Transformation again for hard augmentation
         # make easy prediction be hard one -> To use GT for unlabeled
@@ -262,12 +372,12 @@ class PoseCoTrain(Model):
         grids = affine_grid(thetas, H, W)
 
         unsup_x_trans1 = bilinear_sampler(
-            unsup_x,
+            unsup_x_trans,
             grids[:, 0, ...],
             grids[:, 1, ...]
         )
         unsup_x_trans2 = bilinear_sampler(
-            unsup_x,
+            unsup_x_trans_2,
             grids[:, 0, ...],
             grids[:, 1, ...]
         )

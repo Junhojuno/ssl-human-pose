@@ -161,7 +161,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     cwd = Path(args.cwd).resolve()
-    coco_dir = cwd.parent / 'datasets' / 'mscoco'
+    coco_dir = cwd / 'datasets' / 'basic_sources' / 'coco_dataset'
     save_dir = coco_dir / 'tfrecords'
 
     convert_to_tfrecord(
