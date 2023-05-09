@@ -56,3 +56,20 @@ def mse_loss(y_true, y_pred):
     loss = tf.math.squared_difference(y_true, y_pred)
     loss = tf.math.reduce_mean(loss, axis=(1, 2))
     return loss
+
+
+def pose_dual_loss_fn(true_hm, pred_hms):
+    sup_pred_hm1, sup_pred_hm2, \
+        unsup_true_hm1, unsup_true_hm2, \
+        unsup_pred_hm1, unsup_pred_hm2 = pred_hms
+
+    loss_sup = \
+        0.5 * keypoint_loss(true_hm, sup_pred_hm1) + \
+        0.5 * keypoint_loss(true_hm, sup_pred_hm2)
+
+    loss_unsup = \
+        keypoint_loss(unsup_true_hm1, unsup_pred_hm2) + \
+        keypoint_loss(unsup_true_hm2, unsup_pred_hm1)
+
+    loss = loss_sup + loss_unsup  # (B,)
+    return loss

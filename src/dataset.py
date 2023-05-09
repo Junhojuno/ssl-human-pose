@@ -1,22 +1,40 @@
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict
 
 import tensorflow as tf
 
 # from coco import MixCOCO
-from utils import (
+from src.transforms import (
     parse_example,
     parse_example_unlabeled,
     preprocess,
     preprocess_unlabeled
 )
-from heatmap import batch_gen_heatmap_offsetmap
+from src.heatmap import batch_gen_heatmap
 
 
 def load_mixed_dataset(
-    datasets: List
+    args: Dict,
+    data_dir: Path
 ):
-    ds = tf.data.Dataset.zip(datasets, name='ssl_dataset')
+    labeled_ds = load_dataset(
+        args,
+        str(data_dir / args.DATASET.TRAIN.PATTERN),
+        'train',
+        args.TRAIN.BATCH_SIZE,
+        use_aug=True
+
+    )
+    unlabeled_ds = load_unlabeled_dataset(
+        args,
+        str(data_dir / args.DATASET.UNLABELED.PATTERN),
+        args.TRAIN.BATCH_SIZE,
+        use_aug=True
+    )
+    ds = tf.data.Dataset.zip(
+        (labeled_ds, unlabeled_ds),
+        name='ssl_dataset'
+    )
     return ds
 
 
@@ -35,7 +53,7 @@ def load_dataset(
                        num_parallel_calls=AUTOTUNE)
     if mode == 'train':
         ds = ds.shuffle(
-            buffer_size=50000, reshuffle_each_iteration=True
+            buffer_size=5, reshuffle_each_iteration=True
         )
     ds = ds.map(
         lambda record: parse_example(record, args.DATASET.COMMON.K),
@@ -69,13 +87,11 @@ def load_dataset(
     ]
     ds = ds.map(
         lambda images, keypoints: (
-            images, *batch_gen_heatmap_offsetmap(
+            images, batch_gen_heatmap(
                 keypoints,
                 output_shape,
                 args.DATASET.COMMON.K,
-                args.DATASET.COMMON.SIGMA,
-                locref_stdev=args.DATASET.COMMON.LOCREF_STDEV,
-                kpd=args.DATASET.COMMON.KPD
+                args.DATASET.COMMON.SIGMA
             )
         ),
         num_parallel_calls=AUTOTUNE
@@ -97,7 +113,7 @@ def load_unlabeled_dataset(
                        num_parallel_calls=AUTOTUNE)
 
     ds = ds.shuffle(
-        buffer_size=50000, reshuffle_each_iteration=True
+        buffer_size=5, reshuffle_each_iteration=True
     )
 
     ds = ds.map(

@@ -1,5 +1,5 @@
 """heatmap and offsetmap generation"""
-from typing import Optional, List, Tuple
+from typing import List, Tuple
 import tensorflow as tf
 
 
