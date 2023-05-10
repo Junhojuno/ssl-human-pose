@@ -81,6 +81,7 @@ TRAIN:
 VAL:
   BATCH_SIZE: 48
   DO_EVAL: true
+  COCO_JSON: datasets/mscoco/annotations/person_keypoints_val2017.json
 
 WANDB:
   USE: true
