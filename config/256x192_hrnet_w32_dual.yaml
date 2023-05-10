@@ -1,5 +1,5 @@
 DATASET:
-  NAME: coco_dataset
+  NAME: mscoco
   TRAIN:
     PATTERN: tfrecords/train/*.tfrecord
     EXAMPLES: 149544
@@ -31,7 +31,7 @@ AUG:
   ROT_PROB: 0.6
   ROT_FACTOR: 30
   FLIP_PROB: 0.5
-  KP_FLIP:  # coco
+  KP_FLIP: # coco
     - 0
     - 2
     - 1
@@ -72,11 +72,22 @@ MODEL:
 TRAIN:
   EPOCHS: 300
   LR: 0.001
-  BATCH_SIZE: 8
+  BATCH_SIZE: 1
   LR_FACTOR: 0.1
-  LR_STEP:
-  - 220
-  - 260
+  LR_EPOCHS:
+    - 220
+    - 260
 
 VAL:
   BATCH_SIZE: 48
+  DO_EVAL: true
+
+WANDB:
+  USE: true
+  PROJECT: ssl-human-pose
+  SUBTITLE: mscoco
+  NAME: null
+
+OUTPUT:
+  DIR: null
+  CKPT: null

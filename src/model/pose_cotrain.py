@@ -25,6 +25,10 @@ class PoseCoTrain(Model):
         self.rf = rotation_factor
         self.n_joints_mask = n_joints_mask
 
+    def build(self, input_shape):
+        self.heavy_model.build(input_shape)
+        self.lite_model.build(input_shape)
+
     def call(self, sup_x, unsup_x, training=True):
         B = tf.shape(sup_x)[0]
         H = tf.shape(sup_x)[1]
@@ -106,6 +110,12 @@ class PoseCoTrain(Model):
         rf: float,
         sf: float
     ):
+        """return 2x3 scale-rotation matrix"""
+        scale = tf.clip_by_value(
+            tf.random.normal([]) * sf + 1,
+            1 - sf,
+            1 + sf
+        )
         angle = tf.cond(
             tf.math.less_equal(tf.random.uniform([]), 0.8),
             lambda: tf.clip_by_value(
@@ -117,11 +127,14 @@ class PoseCoTrain(Model):
         )
 
         radian = angle / 180 * tf.constant(math.pi, dtype=tf.float32)
-        theta = [
-            [sf * tf.math.cos(radian), sf * tf.math.sin(radian), 0.],
-            [-sf * tf.math.sin(radian), sf * tf.math.cos(radian), 0.]
-        ]
-        return theta
+        theta = tf.convert_to_tensor(
+            [
+                [scale * tf.math.cos(radian), scale * tf.math.sin(radian), 0.],
+                [-scale * tf.math.sin(radian), scale * tf.math.cos(radian), 0.]
+            ],
+            dtype=tf.float32
+        )
+        return theta  # (2, 3)
 
     def _get_batch_theta(
         self,
@@ -129,13 +142,19 @@ class PoseCoTrain(Model):
         rf: float,
         sf: float
     ):
-        thetas = tf.stack(
-            [
-                self._get_single_theta(rf, sf)
-                for _ in tf.range(batch_size)
-            ],
-            axis=0
+        thetas = tf.map_fn(
+            lambda i: self._get_single_theta(rf, sf),
+            elems=tf.range(batch_size),
+            fn_output_signature=tf.float32
         )
+
+        # thetas = tf.stack(
+        #     [
+        #         self._get_single_theta(rf, sf)
+        #         for _ in tf.range(batch_size)
+        #     ],
+        #     axis=0
+        # )
         return thetas
 
     def _affine_grid(self, thetas, height, width):
