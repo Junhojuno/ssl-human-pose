@@ -56,6 +56,9 @@ def val_step(inputs, model):
     heavy_loss = keypoint_loss(sup_hms, outputs[0])
     lite_loss = keypoint_loss(sup_hms, outputs[1])
 
+    heavy_loss = tf.math.reduce_mean(heavy_loss)
+    lite_loss = tf.math.reduce_mean(lite_loss)
+
     h_avg_acc, h_valid_cnt = accuracy(
         sup_hms, outputs[0], tf.constant(0.5, tf.float32)
     )
@@ -147,10 +150,12 @@ def main():
     )
     val_ds = load_dataset(
         args,
-        cwd.parent
-        / 'datasets'
-        / args.DATASET.NAME
-        / args.DATASET.VAL.PATTERN,
+        str(
+            cwd.parent
+            / 'datasets'
+            / args.DATASET.NAME
+            / args.DATASET.VAL.PATTERN
+        ),
         'val',
         args.VAL.BATCH_SIZE,
         use_aug=False
@@ -227,7 +232,7 @@ def main():
 
     lowest_heavy_loss = 1e+10
     lowest_lite_loss = 1e+10
-    for epoch in tf.range(args.TRAIN.EPOCHS, dtype=tf.int64):
+    for epoch in range(args.TRAIN.EPOCHS):
         start_time = time.time()
         train_loss, train_h_acc, train_l_acc, \
             val_h_loss, val_l_loss, val_h_acc, val_l_acc = load_metrics()
@@ -248,18 +253,32 @@ def main():
 
         current_lr = optimizer.lr(optimizer.iterations).numpy()
 
+        # print(
+        #     train_loss.avg,
+        #     train_h_acc.avg,
+        #     train_l_acc.avg,
+        #     val_h_loss.avg,
+        #     val_l_loss.avg,
+        #     val_h_acc.avg,
+        #     val_l_acc.avg
+        # )
+
         total_time = time.time() - start_time
 
         # log results
         logger.info(
             f'Epoch[{epoch + 1:03d}/{args.TRAIN.EPOCHS}] '
-            f'| {int(train_time)}s/{int(total_time)} '
-            '[Train] '
-            f'| Loss: {float(train_loss):.4f} '
+            f'| TA: {int(train_time)}s/{int(total_time)}s'
+        )
+        logger.info(
+            '\t[Train] '
+            f'Loss: {float(train_loss.avg):.4f} '
             f'| H-Acc: {float(train_h_acc.avg):.4f} '
-            f'| L-Acc: {float(train_l_acc.avg):.4f} '
-            '[Val] '
-            f'| H-Loss: {float(val_h_loss.avg):.4f} '
+            f'| L-Acc: {float(train_l_acc.avg):.4f}'
+        )
+        logger.info(
+            '\t[Val] '
+            f'H-Loss: {float(val_h_loss.avg):.4f} '
             f'| L-Loss: {float(val_l_loss.avg):.4f} '
             f'| H-Acc: {float(val_h_acc.avg):.4f} '
             f'| L-Acc: {float(val_l_acc.avg):.4f} '
@@ -281,7 +300,7 @@ def main():
             )
 
         # Terminate when NaN loss
-        if tf.math.is_nan(train_loss):
+        if tf.math.is_nan(train_loss.avg):
             logger.info('Training is Terminated because of NaN Loss.')
             raise ValueError('NaN Loss has coming up.')
 
