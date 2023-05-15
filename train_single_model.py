@@ -68,15 +68,15 @@ def main():
             sf=args.AUG.SCALE_FACTOR,
             rot=args.AUG.ROT_FACTOR
         )
-    output_dir = cwd / f'results/{args.WANDB.NAME}'
-    # set save_ckpt dir
-    heavy_ckpt_dir = output_dir / 'ckpt' / 'heavy'
-    lite_ckpt_dir = output_dir / 'ckpt' / 'lite'
-    heavy_ckpt_dir.mkdir(parents=True, exist_ok=True)
-    lite_ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    heavy_ckpt_prefix = str(heavy_ckpt_dir / 'best_model.tf')
-    lite_ckpt_prefix = str(lite_ckpt_dir / 'best_model.tf')
+    output_dir = cwd / f'results/{args.WANDB.NAME}'
+    ckpt_dir = output_dir / 'ckpt'
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+    args.OUTPUT.DIR = str(output_dir)
+    args.OUTPUT.CKPT = str(ckpt_dir)
+
+    ckpt_prefix = str(ckpt_dir / 'best_model.tf')
 
     logger = get_logger(
         str(output_dir / 'work.log')
@@ -217,19 +217,16 @@ def main():
             raise ValueError('NaN Loss has coming up.')
 
         # save model newest weights
-        model.heavy_model.save_weights(
-            heavy_ckpt_prefix.replace('best', 'newest')
-        )
-        model.lite_model.save_weights(
-            lite_ckpt_prefix.replace('best', 'newest')
+        model.save_weights(
+            ckpt_prefix.replace('best', 'newest')
         )
         if val_loss.avg < lowest_loss:
-            lowest_heavy_loss = val_loss.avg
-            model.save_weights(heavy_ckpt_prefix)
+            lowest_loss = val_loss.avg
+            model.save_weights(ckpt_prefix)
 
     # final evaluation with best model
     if eval_ds is not None:
-        model.load_weights(heavy_ckpt_prefix)
+        model.load_weights(ckpt_prefix)
 
         _, details = validate(
             model,
@@ -246,6 +243,7 @@ def main():
                 columns=list(details.keys())
             )
             run.log({'eval': eval_table})
+
 
 if __name__ == '__main__':
     main()

@@ -78,7 +78,8 @@ def main():
             sf=args.AUG.SCALE_FACTOR,
             rot=args.AUG.ROT_FACTOR
         )
-    output_dir = cwd / f'results/{args.WANDB.NAME}'
+    args.OUTPUT.DIR = output_dir = cwd / f'results/{args.WANDB.NAME}'
+
     # set save_ckpt dir
     heavy_ckpt_dir = output_dir / 'ckpt' / 'heavy'
     lite_ckpt_dir = output_dir / 'ckpt' / 'lite'
@@ -173,7 +174,8 @@ def main():
             val_h_loss, val_l_loss, val_h_acc, val_l_acc = load_metrics()
 
         for inputs in train_ds:
-            t_outputs = train_step_dual(inputs, model, optimizer, pose_dual_loss_fn)
+            t_outputs = train_step_dual(
+                inputs, model, optimizer, pose_dual_loss_fn)
             train_loss.update(t_outputs[0].numpy(), args.TRAIN.BATCH_SIZE)
             train_h_acc.update(t_outputs[1].numpy(), t_outputs[3].numpy())
             train_l_acc.update(t_outputs[2].numpy(), t_outputs[4].numpy())

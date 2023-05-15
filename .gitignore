@@ -1,4 +1,6 @@
 # not to be pushed
+results/
+wandb/
 *test*
 *legacy*
 *copy*
