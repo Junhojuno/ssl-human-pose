@@ -253,16 +253,6 @@ def main():
 
         current_lr = optimizer.lr(optimizer.iterations).numpy()
 
-        # print(
-        #     train_loss.avg,
-        #     train_h_acc.avg,
-        #     train_l_acc.avg,
-        #     val_h_loss.avg,
-        #     val_l_loss.avg,
-        #     val_h_acc.avg,
-        #     val_l_acc.avg
-        # )
-
         total_time = time.time() - start_time
 
         # log results
