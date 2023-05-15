@@ -67,7 +67,7 @@ AUG:
   N_JOINTS_MASK: 5
 
 MODEL:
-  NAME: ssl_hrnet
+  NAME: hrnet_dual
 
 TRAIN:
   EPOCHS: 300

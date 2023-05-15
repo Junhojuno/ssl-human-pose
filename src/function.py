@@ -6,9 +6,11 @@ from tempfile import NamedTemporaryFile
 
 from tqdm import tqdm
 import cv2
+import tensorflow as tf
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
+from src.metrics import accuracy
 from src.eval import (
     flip,
     flip_outputs,
@@ -17,6 +19,96 @@ from src.eval import (
     get_max_preds,
     STATS_NAMES
 )
+
+
+@tf.function
+def train_step(inputs, model, optimizer, criterion):
+    sup_images, sup_hms = inputs
+    with tf.GradientTape() as tape:
+        outputs = model(sup_images, training=True)
+        loss = criterion(sup_hms, outputs)
+        loss = tf.math.reduce_mean(loss)
+        loss += sum(model.losses)
+    gradients = tape.gradient(loss, model.trainable_variables)
+    optimizer.apply_gradients(
+        zip(gradients, model.trainable_variables)
+    )
+    avg_acc, valid_cnt = accuracy(
+        sup_hms, outputs, tf.constant(0.5, tf.float32)
+    )
+
+    return (
+        loss,
+        avg_acc,
+        valid_cnt,
+    )
+
+
+@tf.function
+def val_step(inputs, model, criterion):
+    sup_images, sup_hms = inputs
+    outputs = model(sup_images, training=False)
+    loss = criterion(sup_hms, outputs)
+    loss = tf.math.reduce_mean(loss)
+    avg_acc, valid_cnt = accuracy(
+        sup_hms, outputs, tf.constant(0.5, tf.float32)
+    )
+    return (
+        loss,
+        avg_acc,
+        valid_cnt,
+    )
+
+@tf.function
+def train_step_dual(inputs, model, optimizer, criterion_dual):
+    (sup_images, sup_hms), unsup_images = inputs
+    with tf.GradientTape() as tape:
+        outputs = model(sup_images, unsup_images, training=True)
+        loss = criterion_dual(sup_hms, outputs)
+        loss = tf.math.reduce_mean(loss)
+        loss += sum(model.losses)
+    gradients = tape.gradient(loss, model.trainable_variables)
+    optimizer.apply_gradients(
+        zip(gradients, model.trainable_variables)
+    )
+    h_avg_acc, h_valid_cnt = accuracy(
+        sup_hms, outputs[0], tf.constant(0.5, tf.float32)
+    )
+    l_avg_acc, l_valid_cnt = accuracy(
+        sup_hms, outputs[1], tf.constant(0.5, tf.float32)
+    )
+    return (
+        loss,
+        h_avg_acc, l_avg_acc,
+        h_valid_cnt, l_valid_cnt
+    )
+
+
+@tf.function
+def val_step_dual(inputs, model, criterion):
+    sup_images, sup_hms = inputs
+    outputs = model(
+        sup_images,
+        tf.zeros_like(sup_images),
+        training=False
+    )
+    heavy_loss = criterion(sup_hms, outputs[0])
+    lite_loss = criterion(sup_hms, outputs[1])
+
+    heavy_loss = tf.math.reduce_mean(heavy_loss)
+    lite_loss = tf.math.reduce_mean(lite_loss)
+
+    h_avg_acc, h_valid_cnt = accuracy(
+        sup_hms, outputs[0], tf.constant(0.5, tf.float32)
+    )
+    l_avg_acc, l_valid_cnt = accuracy(
+        sup_hms, outputs[1], tf.constant(0.5, tf.float32)
+    )
+    return (
+        heavy_loss, lite_loss,
+        h_avg_acc, l_avg_acc,
+        h_valid_cnt, l_valid_cnt
+    )
 
 
 def validate(
@@ -28,6 +120,7 @@ def validate(
     print_func: Callable,
     use_flip: bool = True,
 ):
+    """calculate AP"""
     with suppress_stdout():
         coco = COCO(coco_path)
 
