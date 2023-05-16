@@ -1,4 +1,5 @@
 # not to be pushed
+*.vscode*
 results/
 wandb/
 *test*
